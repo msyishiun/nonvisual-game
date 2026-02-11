@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>黑白幾何遊戲 R2 (語音版)</title>
+    <title>黑白幾何遊戲 R3 (加速版)</title>
     <style>
         body {
             margin: 0;
@@ -51,6 +51,20 @@
             pointer-events: auto;
         }
 
+        /* 返回按鈕樣式 */
+        #back-btn {
+            pointer-events: auto;
+            background: #fff;
+            color: #000;
+            border: none;
+            padding: 5px 10px;
+            font-weight: bold;
+            font-family: inherit;
+            display: none; /* 預設隱藏，遊戲中顯示 */
+            width: fit-content;
+            margin-bottom: 10px;
+        }
+
         #center-msg {
             position: absolute;
             top: 50%; left: 50%;
@@ -60,6 +74,7 @@
             padding: 20px;
             border: 1px solid white;
             display: block; /* 初始顯示 */
+            pointer-events: auto;
         }
 
         /* 隱藏關卡專用音量滑桿 */
@@ -84,6 +99,10 @@
             justify-content: center;
             pointer-events: auto;
         }
+        
+        button {
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -92,10 +111,13 @@
     <canvas id="gameCanvas"></canvas>
     
     <div id="ui-layer">
-        <div class="hud-text" id="top-hud">等待開始... (點3下)</div>
+        <div>
+            <button id="back-btn" onclick="returnToMenu()">回主選單</button>
+            <div class="hud-text" id="top-hud">等待開始... (點3下)</div>
+        </div>
         
         <div id="center-msg">
-            <h2>黑白幾何 R2</h2>
+            <h2>黑白幾何 R3</h2>
             <p>主畫面操作指令：</p>
             <ul style="text-align:left; font-size:14px;">
                 <li>點 3 下：開始遊戲</li>
@@ -103,12 +125,13 @@
                 <li>點 2 下：放棄/重置</li>
                 <li>點 1 下：確定/購買</li>
             </ul>
+            <p style="font-size:12px; color:#aaa;">提示：金幣越多，移動速度越快</p>
         </div>
 
         <div class="hud-text" style="text-align: center;">
             <input type="range" id="volume-control" min="0" max="100" value="100">
             <br>
-            <span id="bottom-hud">金幣: 0</span>
+            <span id="bottom-hud">金幣: 10</span>
             <br>
             <button id="screen-toggle-btn" style="pointer-events:auto; margin-top:5px; background:black; color:white; border:1px solid white;">隱藏螢幕</button>
         </div>
@@ -133,7 +156,7 @@ const STATE = {
     scene: 'MENU', // MENU, GAME, HIDDEN, SHOP
     level: 1,
     maxLevels: 100,
-    coins: 0,
+    coins: 10, // 初始 10 金幣
     player: { x: 0, y: 0, vx: 0, vy: 0, soundType: 0 },
     shape: null, // 當前關卡的幾何資訊
     objects: [], // 金幣, 出口, 旗子
@@ -151,7 +174,6 @@ const ctx = canvas.getContext('2d');
 const AudioSys = {
     ctx: new (window.AudioContext || window.webkitAudioContext)(),
     
-    // MIDI風格合成音效
     playTone: function(freq, type, duration, vol=0.1) {
         if (this.ctx.state === 'suspended') this.ctx.resume();
         const osc = this.ctx.createOscillator();
@@ -169,17 +191,15 @@ const AudioSys = {
     // 語音播報 (Text-to-Speech)
     speak: function(text) {
         if ('speechSynthesis' in window) {
-            // 取消之前的發音，避免重疊
             window.speechSynthesis.cancel(); 
             const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'en-US'; // 設定為英文
-            utterance.rate = 1.0; // 語速正常
-            utterance.pitch = 1.0;
+            utterance.lang = 'en-US'; 
+            utterance.rate = 1.0; 
             window.speechSynthesis.speak(utterance);
         }
     },
 
-    hit: () => AudioSys.playTone(150, 'sawtooth', 0.1, 0.3), // 撞牆
+    hit: () => AudioSys.playTone(150, 'sawtooth', 0.1, 0.3),
     step: () => {
         let baseFreq = 200 + (STATE.player.soundType * 100);
         AudioSys.playTone(baseFreq, 'square', 0.05, 0.1); 
@@ -188,475 +208,12 @@ const AudioSys = {
         AudioSys.playTone(1200, 'sine', 0.1, 0.2);
         setTimeout(() => AudioSys.playTone(1800, 'sine', 0.2, 0.2), 50);
     },
-    door: () => AudioSys.playTone(100, 'triangle', 1.0, 0.4), // 開門聲
-    win: () => { // 勝利音效
+    door: () => AudioSys.playTone(100, 'triangle', 1.0, 0.4),
+    win: () => {
         [523, 659, 783, 1046].forEach((f, i) => {
             setTimeout(() => AudioSys.playTone(f, 'sine', 0.3, 0.3), i * 150);
         });
     },
     teleport: () => {
         AudioSys.playTone(800, 'sawtooth', 0.5, 0.3);
-        setTimeout(() => AudioSys.playTone(200, 'sawtooth', 0.5, 0.3), 200);
-    }
-};
-
-/**
- * 幾何圖形生成邏輯
- */
-function createShape(level, width, height) {
-    const cx = width / 2;
-    const cy = height / 2;
-    const r = Math.min(width, height) * 0.4; // 半徑
-    let type = '';
-    let vertices = [];
-
-    // 隨機形狀 (1-100關)
-    // 形狀池：正方形(0), 菱形(1), 圓形(2), 三角形(3), 長方形(4), 正五邊形(5), 正六邊形(6), 正八邊形(7)
-    let shapeIdx = Math.floor(Math.random() * 8);
-    
-    // 隱藏關卡強制為圓形
-    if (level === 101) shapeIdx = 2;
-
-    switch(shapeIdx) {
-        case 0: type = 'poly'; vertices = createPoly(cx, cy, r, 4, Math.PI/4); break; // 正方形
-        case 1: type = 'poly'; vertices = createPoly(cx, cy, r, 4, 0); break; // 菱形
-        case 2: type = 'circle'; break; // 圓形
-        case 3: type = 'poly'; vertices = createPoly(cx, cy, r, 3, -Math.PI/2); break; // 三角形
-        case 4: type = 'rect'; break; // 長方形 (特殊處理)
-        case 5: type = 'poly'; vertices = createPoly(cx, cy, r, 5, -Math.PI/2); break; // 五邊形
-        case 6: type = 'poly'; vertices = createPoly(cx, cy, r, 6, 0); break; // 六邊形
-        case 7: type = 'poly'; vertices = createPoly(cx, cy, r, 8, Math.PI/8); break; // 八邊形
-    }
-
-    if (type === 'rect') {
-        let w = r * 1.5;
-        let h = r * 0.8;
-        vertices = [
-            {x: cx - w, y: cy - h},
-            {x: cx + w, y: cy - h},
-            {x: cx + w, y: cy + h},
-            {x: cx - w, y: cy + h}
-        ];
-        type = 'poly';
-    }
-
-    return { type, cx, cy, r, vertices };
-}
-
-function createPoly(cx, cy, r, sides, rotation) {
-    let verts = [];
-    for (let i = 0; i < sides; i++) {
-        let angle = rotation + (i * 2 * Math.PI / sides);
-        verts.push({
-            x: cx + r * Math.cos(angle),
-            y: cy + r * Math.sin(angle)
-        });
-    }
-    return verts;
-}
-
-/**
- * 碰撞檢測演算法
- */
-function isInside(x, y, shape) {
-    if (shape.type === 'circle') {
-        let dist = Math.sqrt((x - shape.cx)**2 + (y - shape.cy)**2);
-        return dist < shape.r;
-    } else {
-        // Ray casting algorithm for polygon
-        let inside = false;
-        let vs = shape.vertices;
-        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
-            let xi = vs[i].x, yi = vs[i].y;
-            let xj = vs[j].x, yj = vs[j].y;
-            let intersect = ((yi > y) != (yj > y)) &&
-                (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-            if (intersect) inside = !inside;
-        }
-        return inside;
-    }
-}
-
-/**
- * 關卡初始化
- */
-function initLevel(levelNum) {
-    STATE.level = levelNum;
-    STATE.doorOpen = false;
-    STATE.objects = [];
-    
-    // 調整畫布大小
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    
-    // 生成形狀
-    STATE.shape = createShape(levelNum, canvas.width, canvas.height);
-    
-    // 玩家位置 (中心)
-    STATE.player.x = canvas.width / 2;
-    STATE.player.y = canvas.height / 2;
-
-    // 單位距離 (螢幕1/10)
-    let unit = canvas.width / 10;
-
-    // 1. 放置出口 (隨機且在形狀內)
-    let exitPos = getRandomPosInShape();
-    STATE.objects.push({ type: 'exit', x: exitPos.x, y: exitPos.y, r: 15 });
-
-    // 2. 放置金幣
-    let boundR = STATE.shape.r;
-    let cx = STATE.shape.cx;
-    let cy = STATE.shape.cy;
-    let step = 40; 
-    for (let dy = -boundR; dy <= boundR; dy += step) {
-        for (let dx = -boundR; dx <= boundR; dx += step) {
-            let tx = cx + dx;
-            let ty = cy + dy;
-            tx += (Math.random() - 0.5) * 10;
-            ty += (Math.random() - 0.5) * 10;
-
-            if (isInside(tx, ty, STATE.shape)) {
-                if (dist(tx, ty, STATE.player.x, STATE.player.y) > 30 && 
-                    dist(tx, ty, exitPos.x, exitPos.y) > 30) {
-                    STATE.objects.push({ type: 'coin', x: tx, y: ty, r: 5 });
-                }
-            }
-        }
-    }
-
-    // 3. 第一關特殊物件：旗子
-    if (STATE.level === 1) {
-        let angle = Math.random() * Math.PI * 2;
-        let flagDist = unit * 3.5; 
-        let fx = STATE.player.x + Math.cos(angle) * flagDist;
-        let fy = STATE.player.y + Math.sin(angle) * flagDist;
-        
-        if (!isInside(fx, fy, STATE.shape)) {
-             let valid = getRandomPosInShape();
-             fx = valid.x; fy = valid.y;
-        }
-        STATE.objects.push({ type: 'flag', x: fx, y: fy, r: 10 });
-    }
-
-    // UI 更新
-    document.getElementById('top-hud').innerText = (STATE.level === 101) ? "隱藏關卡" : `Level ${STATE.level}/100`;
-    document.getElementById('center-msg').style.display = 'none';
-    
-    // 隱藏關卡特殊UI
-    let volCtrl = document.getElementById('volume-control');
-    if (STATE.level === 101) {
-        volCtrl.style.display = 'inline-block';
-        document.getElementById('top-hud').innerText = "隱藏關卡：請將音量調至最低";
-        AudioSys.speak("Hidden Stage Start");
-    } else {
-        volCtrl.style.display = 'none';
-        // 播報關卡語音 "Stage X Start"
-        AudioSys.speak(`Stage ${STATE.level} Start`);
-    }
-}
-
-function getRandomPosInShape() {
-    let x, y;
-    let limit = 0;
-    do {
-        x = canvas.width/2 + (Math.random() - 0.5) * STATE.shape.r * 2;
-        y = canvas.height/2 + (Math.random() - 0.5) * STATE.shape.r * 2;
-        limit++;
-    } while (!isInside(x, y, STATE.shape) && limit < 100);
-    return {x, y};
-}
-
-function dist(x1, y1, x2, y2) {
-    return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
-}
-
-/**
- * 遊戲主迴圈
- */
-function update() {
-    if (STATE.scene !== 'GAME' && STATE.scene !== 'HIDDEN') return;
-
-    // --- 速度控制邏輯 (更新點 1) ---
-    // 基礎速度係數 (Level 1)
-    let baseSpeedFactor = 0.08; 
-    
-    // 如果關卡 > 1，速度變為 2 倍
-    let speedMultiplier = (STATE.level > 1) ? 2.0 : 1.0;
-    
-    let speed = (canvas.width / 10) * baseSpeedFactor * speedMultiplier;
-    
-    // 根據手機傾斜計算新位置
-    let nextX = STATE.player.x + STATE.player.vx * speed;
-    let nextY = STATE.player.y + STATE.player.vy * speed;
-
-    // 邊界檢查
-    if (isInside(nextX, nextY, STATE.shape)) {
-        // 移動有效
-        if (Math.abs(nextX - STATE.player.x) > 0.5 || Math.abs(nextY - STATE.player.y) > 0.5) {
-            if (Math.random() > 0.9) AudioSys.step();
-        }
-        STATE.player.x = nextX;
-        STATE.player.y = nextY;
-    } else {
-        // 撞牆
-        if (Math.abs(STATE.player.vx) > 0.1 || Math.abs(STATE.player.vy) > 0.1) {
-             if (Math.random() > 0.8) AudioSys.hit();
-        }
-    }
-
-    // 物件碰撞檢查
-    for (let i = STATE.objects.length - 1; i >= 0; i--) {
-        let obj = STATE.objects[i];
-        if (dist(STATE.player.x, STATE.player.y, obj.x, obj.y) < (obj.r + 5)) {
-            if (obj.type === 'coin') {
-                STATE.coins++;
-                AudioSys.coin();
-                STATE.objects.splice(i, 1);
-                updateCoinDisplay();
-            } 
-            else if (obj.type === 'flag') {
-                AudioSys.teleport();
-                alert("發現旗子！傳送至隱藏關卡！");
-                STATE.scene = 'HIDDEN';
-                initLevel(101);
-                return;
-            } 
-            else if (obj.type === 'exit') {
-                if (STATE.level === 101 && !STATE.doorOpen) {
-                    // 隱藏關卡門沒開不能進
-                } else {
-                    levelComplete();
-                }
-            }
-        }
-    }
-
-    // 隱藏關卡邏輯
-    if (STATE.level === 101) {
-        // 檢查模擬音量
-        let vol = document.getElementById('volume-control').value;
-        if (vol < 5 && !STATE.doorOpen) {
-            STATE.doorOpen = true;
-            AudioSys.door();
-            document.getElementById('top-hud').innerText = "出口已開啟！";
-        }
-    }
-}
-
-function levelComplete() {
-    AudioSys.win();
-    STATE.level++;
-    if (STATE.level > CONFIG.maxLevels && STATE.level !== 102) { 
-        STATE.scene = 'HIDDEN';
-        alert("恭喜通關100層！解鎖隱藏關卡！");
-        initLevel(101);
-    } else if (STATE.level === 102) { 
-        alert("全遊戲通關！恭喜！");
-        STATE.scene = 'MENU';
-        resetGame();
-    } else {
-        // 下一關
-        initLevel(STATE.level);
-    }
-}
-
-function draw() {
-    // 清空背景
-    ctx.fillStyle = '#000';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    if (STATE.scene === 'MENU') {
-        return; 
-    }
-
-    if (STATE.shape) {
-        ctx.fillStyle = '#fff';
-        if (STATE.shape.type === 'circle') {
-            ctx.beginPath();
-            ctx.arc(STATE.shape.cx, STATE.shape.cy, STATE.shape.r, 0, Math.PI*2);
-            ctx.fill();
-        } else {
-            ctx.beginPath();
-            STATE.shape.vertices.forEach((v, i) => {
-                if (i===0) ctx.moveTo(v.x, v.y);
-                else ctx.lineTo(v.x, v.y);
-            });
-            ctx.closePath();
-            ctx.fill();
-        }
-    }
-
-    // 畫物件
-    STATE.objects.forEach(obj => {
-        if (obj.type === 'exit') {
-            // 出口
-            ctx.fillStyle = (STATE.level === 101 && !STATE.doorOpen) ? '#555' : '#000';
-            ctx.fillRect(obj.x - 10, obj.y - 10, 20, 20);
-            ctx.fillStyle = '#fff';
-            ctx.font = '12px Arial';
-            ctx.fillText("EXIT", obj.x-12, obj.y-12);
-        } else if (obj.type === 'coin') {
-            ctx.fillStyle = '#000'; 
-            ctx.beginPath();
-            ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI*2);
-            ctx.fill();
-            ctx.strokeStyle = '#000';
-            ctx.stroke();
-        } else if (obj.type === 'flag') {
-            ctx.fillStyle = '#000';
-            ctx.font = '20px Arial';
-            ctx.fillText("⚑", obj.x-5, obj.y+5);
-        }
-    });
-
-    // 畫玩家
-    ctx.fillStyle = '#000';
-    ctx.beginPath();
-    ctx.arc(STATE.player.x, STATE.player.y, 6, 0, Math.PI*2);
-    ctx.fill();
-    ctx.strokeStyle = '#888'; 
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    requestAnimationFrame(draw);
-}
-
-function gameLoop() {
-    update();
-    draw();
-    setTimeout(gameLoop, 1000/60);
-}
-
-/**
- * 輸入控制系統
- */
-
-// 1. 重力感應
-window.addEventListener('deviceorientation', (e) => {
-    let y = e.beta; 
-    let x = e.gamma;
-    
-    if (x > 45) x = 45; if (x < -45) x = -45;
-    if (y > 45) y = 45; if (y < -45) y = -45;
-    
-    STATE.player.vx = x / 45;
-    STATE.player.vy = y / 45;
-});
-
-// 電腦測試用
-window.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp') STATE.player.vy = -1;
-    if (e.key === 'ArrowDown') STATE.player.vy = 1;
-    if (e.key === 'ArrowLeft') STATE.player.vx = -1;
-    if (e.key === 'ArrowRight') STATE.player.vx = 1;
-});
-window.addEventListener('keyup', () => {
-    STATE.player.vx = 0; STATE.player.vy = 0;
-});
-
-// 2. 觸控指令
-document.getElementById('game-container').addEventListener('click', (e) => {
-    if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
-
-    STATE.tapCount++;
-    clearTimeout(STATE.tapTimer);
-    
-    STATE.tapTimer = setTimeout(() => {
-        handleTapCommand(STATE.tapCount);
-        STATE.tapCount = 0;
-    }, CONFIG.tapDelay);
-});
-
-function handleTapCommand(count) {
-    if (STATE.scene === 'MENU') {
-        if (count === 3) {
-            STATE.scene = 'GAME';
-            initLevel(STATE.level); 
-            document.getElementById('center-msg').style.display = 'none';
-        } 
-        else if (count === 2) { 
-            if (confirm("要重置進度回到第1關嗎？")) {
-                STATE.level = 1;
-                STATE.coins = 0;
-                updateCoinDisplay();
-                alert("進度已重置");
-            }
-        }
-        else if (count === 5) { 
-            localStorage.setItem('bwGameSave', JSON.stringify({
-                level: STATE.level,
-                coins: STATE.coins
-            }));
-            alert("遊戲紀錄已儲存！");
-        }
-        else if (count === 1) { 
-            if (STATE.coins >= CONFIG.coinCost) {
-                if(confirm(`是否花費 ${CONFIG.coinCost} 金幣更換移動音效？`)) {
-                    STATE.coins -= CONFIG.coinCost;
-                    STATE.player.soundType = (STATE.player.soundType + 1) % 5;
-                    updateCoinDisplay();
-                    alert("購買成功！");
-                }
-            } else {
-                alert("金幣不足 (需要 100)");
-            }
-        }
-    } 
-    else if (STATE.scene === 'GAME' || STATE.scene === 'HIDDEN') {
-        if (count === 4) { 
-            STATE.scene = 'MENU';
-            document.getElementById('center-msg').style.display = 'block';
-            document.getElementById('top-hud').innerText = "遊戲暫停 (點3下繼續)";
-            document.getElementById('volume-control').style.display = 'none';
-        }
-    }
-}
-
-function updateCoinDisplay() {
-    document.getElementById('bottom-hud').innerText = `金幣: ${STATE.coins}`;
-}
-
-function resetGame() {
-    STATE.level = 1;
-    document.getElementById('center-msg').style.display = 'block';
-    updateCoinDisplay();
-}
-
-/**
- * 螢幕隱藏
- */
-const blackScreen = document.getElementById('black-screen');
-document.getElementById('screen-toggle-btn').addEventListener('click', () => {
-    blackScreen.style.display = 'flex';
-});
-
-blackScreen.addEventListener('click', () => {
-    blackScreen.style.display = 'none';
-});
-
-const savedData = localStorage.getItem('bwGameSave');
-if (savedData) {
-    const data = JSON.parse(savedData);
-    STATE.level = data.level || 1;
-    STATE.coins = data.coins || 0;
-    updateCoinDisplay();
-}
-
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-gameLoop();
-
-document.addEventListener('click', async () => {
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        try {
-            await DeviceOrientationEvent.requestPermission();
-        } catch (e) {
-            console.error(e);
-        }
-    }
-}, { once: true });
-
-</script>
-</body>
-</html>
+        setTimeout(() => Audio
