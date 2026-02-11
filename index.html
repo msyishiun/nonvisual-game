@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>黑白手機遊戲/網頁遊戲</title>
+    <title>黑白手機遊戲/網頁遊戲R1</title>
     <style>
         body {
             margin: 0;
@@ -11,8 +11,8 @@
             background-color: #000;
             color: #fff;
             font-family: 'Courier New', Courier, monospace;
-            overflow: hidden; /* 禁止滾動 */
-            touch-action: none; /* 禁止縮放 */
+            overflow: hidden;
+            touch-action: none; /* 禁止預設觸控行為 */
             user-select: none;
         }
 
@@ -26,76 +26,62 @@
         }
 
         canvas {
-            background-color: #fff;
-            max-width: 100%;
-            max-height: 100%;
-            box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+            border: 2px solid #333;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.1);
         }
 
+        /* UI 層 */
         #ui-layer {
             position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none; /* 讓點擊穿透到下層處理 */
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 20px;
+            padding: 15px;
             box-sizing: border-box;
+            z-index: 10;
         }
 
-        .hud {
-            text-shadow: 1px 1px 2px black;
-            font-size: 18px;
-            font-weight: bold;
-            pointer-events: auto; 
-        }
-
-        #message-area {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            background: rgba(0,0,0,0.8);
-            padding: 20px;
-            border: 2px solid white;
-            display: none;
-        }
-
-        #black-screen {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: #000;
-            z-index: 9999;
-            display: none;
-            color: #333;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-        
-        /* 隱藏關卡的音量模擬器 */
-        #volume-sim {
-            position: absolute;
-            bottom: 50px;
-            width: 80%;
-            left: 10%;
-            display: none;
+        .hud-text {
+            color: #fff;
+            font-size: 16px;
+            text-shadow: 1px 1px 0 #000;
             pointer-events: auto;
         }
 
-        button {
-            background: #000;
-            color: #fff;
-            border: 1px solid #fff;
-            padding: 10px;
-            margin: 5px;
+        #center-msg {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background: rgba(0,0,0,0.85);
+            padding: 20px;
+            border: 1px solid white;
+            display: block; /* 初始顯示 */
+        }
+
+        /* 隱藏關卡專用音量滑桿 */
+        #volume-control {
+            display: none;
+            width: 80%;
+            margin: 0 auto;
+            pointer-events: auto;
+        }
+
+        /* 黑屏遮罩 */
+        #black-screen {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-color: #000;
+            z-index: 9999;
+            display: none;
+            color: #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             pointer-events: auto;
         }
     </style>
@@ -106,590 +92,571 @@
     <canvas id="gameCanvas"></canvas>
     
     <div id="ui-layer">
-        <div class="hud" id="top-hud">
-            主畫面<br>
-            <small>點擊畫面操作: 1下確定, 3下開始, 5下存檔</small>
+        <div class="hud-text" id="top-hud">等待開始... (點3下)</div>
+        
+        <div id="center-msg">
+            <h2>黑白幾何 R1</h2>
+            <p>主畫面操作指令：</p>
+            <ul style="text-align:left; font-size:14px;">
+                <li>點 3 下：開始遊戲</li>
+                <li>點 5 下：儲存紀錄</li>
+                <li>點 2 下：放棄/重置</li>
+                <li>點 1 下：確定/購買</li>
+            </ul>
         </div>
-        <div id="message-area"></div>
-        <div class="hud" id="bottom-hud">
-            <button id="toggle-screen-btn">隱藏螢幕</button>
-            <span id="coin-display">金幣: 0</span>
+
+        <div class="hud-text" style="text-align: center;">
+            <input type="range" id="volume-control" min="0" max="100" value="100">
+            <br>
+            <span id="bottom-hud">金幣: 0</span>
+            <br>
+            <button id="screen-toggle-btn" style="pointer-events:auto; margin-top:5px; background:black; color:white; border:1px solid white;">隱藏螢幕</button>
         </div>
-        <input type="range" id="volume-sim" min="0" max="100" value="100">
     </div>
 </div>
 
 <div id="black-screen">
-    (模擬: 按下音量鍵/點擊此處喚醒)
+    (模擬: 按下音量鍵喚醒)
 </div>
 
 <script>
 /**
- * 遊戲設定與狀態
+ * 遊戲全域變數與設定
  */
 const CONFIG = {
-    totalLevels: 100,
-    tileSizeSmall: 4, // 1-10關 比例
-    tileSizeLarge: 6, // 11-100關 比例
-    moveSpeed: 0.1, // 每次移動螢幕的 1/10
-    tapDelay: 400, // 判斷多連點的毫秒數
+    unitScale: 10, // 螢幕寬度的 1/10
+    tapDelay: 400, // 判定多點擊的間隔(ms)
+    coinCost: 100  // 換音效價格
 };
 
 const STATE = {
+    scene: 'MENU', // MENU, GAME, HIDDEN, SHOP
     level: 1,
+    maxLevels: 100,
     coins: 0,
-    scene: 'MENU', // MENU, GAME, HIDDEN_LEVEL, SHOP
-    maze: [],
-    player: { x: 0, y: 0, soundId: 0 },
-    inventory: ['預設腳步'],
-    isScreenHidden: false,
+    player: { x: 0, y: 0, vx: 0, vy: 0, soundType: 0 },
+    shape: null, // 當前關卡的幾何資訊
+    objects: [], // 金幣, 出口, 旗子
+    volume: 100, // 模擬音量
+    doorOpen: false,
     tapCount: 0,
     tapTimer: null,
-    flagTaken: false, // 是否在第一關拿到旗子
-    hiddenLevelUnlocked: false,
-    hiddenDoorOpen: false
+    hiddenUnlocked: false
 };
 
-// 音效合成器 (避免依賴外部檔案)
-const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-const playSound = (type) => {
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-
-    const now = audioCtx.currentTime;
-    
-    switch (type) {
-        case 'hit': // 撞牆
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(150, now);
-            osc.frequency.exponentialRampToValueAtTime(0.01, now + 0.1);
-            gain.gain.setValueAtTime(0.5, now);
-            osc.start(now);
-            osc.stop(now + 0.1);
-            break;
-        case 'step': // 腳步 (踏踏踏) - 可根據金幣購買改變
-            osc.type = 'square';
-            let pitch = 200 + (STATE.player.soundId * 50); // 不同的移動音效
-            osc.frequency.setValueAtTime(pitch, now);
-            gain.gain.setValueAtTime(0.1, now);
-            gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
-            osc.start(now);
-            osc.stop(now + 0.05);
-            break;
-        case 'coin': // 金幣
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(1200, now);
-            osc.frequency.linearRampToValueAtTime(1800, now + 0.1);
-            gain.gain.setValueAtTime(0.3, now);
-            gain.gain.linearRampToValueAtTime(0, now + 0.2);
-            osc.start(now);
-            osc.stop(now + 0.2);
-            break;
-        case 'door': // 開門/通關
-            osc.type = 'triangle';
-            osc.frequency.setValueAtTime(100, now);
-            osc.frequency.linearRampToValueAtTime(300, now + 0.5);
-            gain.gain.setValueAtTime(0.5, now);
-            gain.gain.linearRampToValueAtTime(0, now + 0.6);
-            osc.start(now);
-            osc.stop(now + 0.6);
-            break;
-        case 'win': // 勝利
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(400, now);
-            osc.frequency.setValueAtTime(600, now + 0.2);
-            osc.frequency.setValueAtTime(800, now + 0.4);
-            gain.gain.setValueAtTime(0.5, now);
-            gain.gain.linearRampToValueAtTime(0, now + 1);
-            osc.start(now);
-            osc.stop(now + 1);
-            break;
-        case 'teleport': // 傳送
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(800, now);
-            osc.frequency.exponentialRampToValueAtTime(100, now + 0.5);
-            gain.gain.setValueAtTime(0.5, now);
-            osc.start(now);
-            osc.stop(now + 0.5);
-            break;
-    }
-};
-
-/**
- * 系統核心
- */
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-let cellSize = 0;
-let mazeWidth = 0;
-let mazeHeight = 0;
 
-// 初始化畫布
-function resize() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-    // 重新計算格子大小
-    calculateGrid();
-    draw();
+// 音效系統 (Web Audio API)
+const AudioSys = {
+    ctx: new (window.AudioContext || window.webkitAudioContext)(),
+    
+    playTone: function(freq, type, duration, vol=0.1) {
+        if (this.ctx.state === 'suspended') this.ctx.resume();
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+    },
+
+    hit: () => AudioSys.playTone(150, 'sawtooth', 0.1, 0.3), // 撞牆
+    step: () => {
+        // 根據購買變更音效
+        let baseFreq = 200 + (STATE.player.soundType * 100);
+        AudioSys.playTone(baseFreq, 'square', 0.05, 0.1); 
+    }, 
+    coin: () => {
+        AudioSys.playTone(1200, 'sine', 0.1, 0.2);
+        setTimeout(() => AudioSys.playTone(1800, 'sine', 0.2, 0.2), 50);
+    },
+    door: () => AudioSys.playTone(100, 'triangle', 1.0, 0.4), // 開門聲
+    win: () => { // 勝利音效
+        [523, 659, 783, 1046].forEach((f, i) => {
+            setTimeout(() => AudioSys.playTone(f, 'sine', 0.3, 0.3), i * 150);
+        });
+    },
+    teleport: () => {
+        AudioSys.playTone(800, 'sawtooth', 0.5, 0.3);
+        setTimeout(() => AudioSys.playTone(200, 'sawtooth', 0.5, 0.3), 200);
+    }
+};
+
+/**
+ * 幾何圖形生成邏輯
+ */
+function createShape(level, width, height) {
+    const cx = width / 2;
+    const cy = height / 2;
+    const r = Math.min(width, height) * 0.4; // 半徑
+    let type = '';
+    let vertices = [];
+
+    // 隨機形狀 (1-100關)
+    // 形狀池：正方形(0), 菱形(1), 圓形(2), 三角形(3), 長方形(4), 正五邊形(5), 正六邊形(6), 正八邊形(7)
+    let shapeIdx = Math.floor(Math.random() * 8);
+    
+    // 隱藏關卡強制為圓形
+    if (level === 101) shapeIdx = 2;
+
+    switch(shapeIdx) {
+        case 0: type = 'poly'; vertices = createPoly(cx, cy, r, 4, Math.PI/4); break; // 正方形
+        case 1: type = 'poly'; vertices = createPoly(cx, cy, r, 4, 0); break; // 菱形
+        case 2: type = 'circle'; break; // 圓形
+        case 3: type = 'poly'; vertices = createPoly(cx, cy, r, 3, -Math.PI/2); break; // 三角形
+        case 4: type = 'rect'; break; // 長方形 (特殊處理)
+        case 5: type = 'poly'; vertices = createPoly(cx, cy, r, 5, -Math.PI/2); break; // 五邊形
+        case 6: type = 'poly'; vertices = createPoly(cx, cy, r, 6, 0); break; // 六邊形
+        case 7: type = 'poly'; vertices = createPoly(cx, cy, r, 8, Math.PI/8); break; // 八邊形
+    }
+
+    if (type === 'rect') {
+        // 長方形 vertices
+        let w = r * 1.5;
+        let h = r * 0.8;
+        vertices = [
+            {x: cx - w, y: cy - h},
+            {x: cx + w, y: cy - h},
+            {x: cx + w, y: cy + h},
+            {x: cx - w, y: cy + h}
+        ];
+        type = 'poly';
+    }
+
+    return { type, cx, cy, r, vertices };
 }
-window.addEventListener('resize', resize);
 
-function calculateGrid() {
-    // 依據關卡決定網格密度
-    let cols = (STATE.level <= 10) ? 8 : 12; // 簡單模擬 4x4 與 6x6 比例的迷宮複雜度
-    // 實際上為了讓迷宮好走，我們會生成奇數格子的迷宮
-    if (STATE.level <= 10) { mazeWidth = 9; mazeHeight = 13; } // 約 4:6 比例
-    else { mazeWidth = 13; mazeHeight = 21; } // 更細緻
-
-    cellSize = Math.min(canvas.width / mazeWidth, canvas.height / mazeHeight) * 0.9;
+function createPoly(cx, cy, r, sides, rotation) {
+    let verts = [];
+    for (let i = 0; i < sides; i++) {
+        let angle = rotation + (i * 2 * Math.PI / sides);
+        verts.push({
+            x: cx + r * Math.cos(angle),
+            y: cy + r * Math.sin(angle)
+        });
+    }
+    return verts;
 }
 
 /**
- * 迷宮生成演算法 (Recursive Backtracker)
+ * 碰撞檢測演算法
  */
-function generateMaze(w, h) {
-    const map = Array.from({ length: h }, () => Array(w).fill(1)); // 1: Wall, 0: Path, 2: Start, 3: End, 4: Coin, 5: Flag
-    
-    const stack = [];
-    const startX = 1;
-    const startY = 1;
-    map[startY][startX] = 0;
-    stack.push({x: startX, y: startY});
-
-    const dirs = [
-        {x: 0, y: -2}, {x: 0, y: 2}, {x: -2, y: 0}, {x: 2, y: 0}
-    ];
-
-    while (stack.length > 0) {
-        const current = stack[stack.length - 1];
-        const neighbors = [];
-
-        dirs.forEach(d => {
-            const nx = current.x + d.x;
-            const ny = current.y + d.y;
-            if (nx > 0 && nx < w - 1 && ny > 0 && ny < h - 1 && map[ny][nx] === 1) {
-                neighbors.push({nx, ny, dx: d.x/2, dy: d.y/2});
-            }
-        });
-
-        if (neighbors.length > 0) {
-            const chosen = neighbors[Math.floor(Math.random() * neighbors.length)];
-            map[current.y + chosen.dy][current.x + chosen.dx] = 0;
-            map[chosen.ny][chosen.nx] = 0;
-            stack.push({x: chosen.nx, y: chosen.ny});
-        } else {
-            stack.pop();
+function isInside(x, y, shape) {
+    if (shape.type === 'circle') {
+        let dist = Math.sqrt((x - shape.cx)**2 + (y - shape.cy)**2);
+        return dist < shape.r;
+    } else {
+        // Ray casting algorithm for polygon
+        let inside = false;
+        let vs = shape.vertices;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+            let xi = vs[i].x, yi = vs[i].y;
+            let xj = vs[j].x, yj = vs[j].y;
+            let intersect = ((yi > y) != (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
         }
+        return inside;
     }
+}
 
-    // 設定起點終點
-    map[1][1] = 2; // Start
-    map[h-2][w-2] = 3; // Exit
+/**
+ * 關卡初始化
+ */
+function initLevel(levelNum) {
+    STATE.level = levelNum;
+    STATE.doorOpen = false;
+    STATE.objects = [];
+    
+    // 調整畫布大小
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // 生成形狀
+    STATE.shape = createShape(levelNum, canvas.width, canvas.height);
+    
+    // 玩家位置 (中心)
+    STATE.player.x = canvas.width / 2;
+    STATE.player.y = canvas.height / 2;
 
-    // 第一關特殊旗子：起點往旁邊約10格 (距離計算簡化為隨機放在稍遠處)
-    if (STATE.level === 1) {
-       // 找一個並非起點和終點的路
-       let placed = false;
-       for(let y=5; y<h-1; y++) {
-           for(let x=1; x<w-1; x++) {
-               if(map[y][x] === 0) {
-                   map[y][x] = 5; // Flag
-                   placed = true;
-                   break;
-               }
-           }
-           if(placed) break;
-       }
-    }
+    // 單位距離 (螢幕1/10)
+    let unit = canvas.width / 10;
 
-    // 在死路放置金幣
-    for (let y = 1; y < h - 1; y++) {
-        for (let x = 1; x < w - 1; x++) {
-            if (map[y][x] === 0) {
-                let walls = 0;
-                if (map[y-1][x] === 1) walls++;
-                if (map[y+1][x] === 1) walls++;
-                if (map[y][x-1] === 1) walls++;
-                if (map[y][x+1] === 1) walls++;
-                
-                if (walls === 3) {
-                    map[y][x] = 4; // Coin
+    // 1. 放置出口 (隨機且在形狀內)
+    let exitPos = getRandomPosInShape();
+    STATE.objects.push({ type: 'exit', x: exitPos.x, y: exitPos.y, r: 15 });
+
+    // 2. 放置金幣 (填滿幾何形狀 -> 網格掃描)
+    let boundR = STATE.shape.r;
+    let cx = STATE.shape.cx;
+    let cy = STATE.shape.cy;
+    let step = 40; // 金幣密度
+    for (let dy = -boundR; dy <= boundR; dy += step) {
+        for (let dx = -boundR; dx <= boundR; dx += step) {
+            let tx = cx + dx;
+            let ty = cy + dy;
+            // 隨機偏移一點讓排列不那麼死板
+            tx += (Math.random() - 0.5) * 10;
+            ty += (Math.random() - 0.5) * 10;
+
+            if (isInside(tx, ty, STATE.shape)) {
+                // 避開起點和出口
+                if (dist(tx, ty, STATE.player.x, STATE.player.y) > 30 && 
+                    dist(tx, ty, exitPos.x, exitPos.y) > 30) {
+                    STATE.objects.push({ type: 'coin', x: tx, y: ty, r: 5 });
                 }
             }
         }
     }
 
-    return map;
-}
-
-function startLevel(lvl) {
-    if (lvl > CONFIG.totalLevels) {
-        // 解鎖隱藏關
-        STATE.scene = 'HIDDEN_LEVEL';
-        STATE.hiddenDoorOpen = false;
-        document.getElementById('volume-sim').style.display = 'block';
-        updateHUD("隱藏關卡：靜謐之環");
-        playSound('door');
-        return;
+    // 3. 第一關特殊物件：旗子 (距離起點10格 = 10 * unit)
+    if (STATE.level === 1) {
+        // 嘗試在圓周上找一個點
+        let angle = Math.random() * Math.PI * 2;
+        // 為了確保在螢幕內且有點挑戰，我們縮短一點距離，因為10格可能超出螢幕
+        // 題目說"往旁邊10格"，若螢幕只有10格寬，這旗子肯定在邊界外。
+        // 我們將其解讀為 "儘可能遠的地方" 或 "邏輯上的10單位"
+        // 這裡設定為距離中心 unit * 3 (比較合理) 的位置，或者直接放角落
+        let flagDist = unit * 3.5; 
+        let fx = STATE.player.x + Math.cos(angle) * flagDist;
+        let fy = STATE.player.y + Math.sin(angle) * flagDist;
+        
+        // 確保旗子在形狀內，如果不在就重算，直到找到
+        // 如果形狀太小放不下，就直接強制放隨機位置
+        if (!isInside(fx, fy, STATE.shape)) {
+             let valid = getRandomPosInShape();
+             fx = valid.x; fy = valid.y;
+        }
+        STATE.objects.push({ type: 'flag', x: fx, y: fy, r: 10 });
     }
 
-    STATE.level = lvl;
-    STATE.scene = 'GAME';
-    STATE.flagTaken = false;
-    calculateGrid();
-    STATE.maze = generateMaze(mazeWidth, mazeHeight);
+    // UI 更新
+    document.getElementById('top-hud').innerText = (STATE.level === 101) ? "隱藏關卡" : `Level ${STATE.level}/100`;
+    document.getElementById('center-msg').style.display = 'none';
     
-    // 玩家歸位
-    STATE.player.x = 1;
-    STATE.player.y = 1;
-    // 像素座標 (用於平滑移動)
-    STATE.player.px = 1 * cellSize;
-    STATE.player.py = 1 * cellSize;
-    
-    updateHUD(`第 ${STATE.level} 關`);
-    playSound('door');
-    document.getElementById('volume-sim').style.display = 'none';
+    // 隱藏關卡特殊UI
+    let volCtrl = document.getElementById('volume-control');
+    if (STATE.level === 101) {
+        volCtrl.style.display = 'inline-block';
+        document.getElementById('top-hud').innerText = "隱藏關卡：請將音量調至最低";
+    } else {
+        volCtrl.style.display = 'none';
+    }
+}
+
+function getRandomPosInShape() {
+    let x, y;
+    let limit = 0;
+    do {
+        x = canvas.width/2 + (Math.random() - 0.5) * STATE.shape.r * 2;
+        y = canvas.height/2 + (Math.random() - 0.5) * STATE.shape.r * 2;
+        limit++;
+    } while (!isInside(x, y, STATE.shape) && limit < 100);
+    return {x, y};
+}
+
+function dist(x1, y1, x2, y2) {
+    return Math.sqrt((x1-x2)**2 + (y1-y2)**2);
 }
 
 /**
- * 遊戲循環與繪圖
+ * 遊戲主迴圈
  */
+function update() {
+    if (STATE.scene !== 'GAME' && STATE.scene !== 'HIDDEN') return;
+
+    // 移動邏輯 (Tile控制)
+    // 速度係數
+    let speed = (canvas.width / 10) * 0.1; // 基礎速度
+    
+    // 根據手機傾斜計算新位置
+    let nextX = STATE.player.x + STATE.player.vx * speed;
+    let nextY = STATE.player.y + STATE.player.vy * speed;
+
+    // 邊界檢查
+    if (isInside(nextX, nextY, STATE.shape)) {
+        // 移動有效
+        if (Math.abs(nextX - STATE.player.x) > 0.5 || Math.abs(nextY - STATE.player.y) > 0.5) {
+            // 產生移動音效 (限流，避免太吵)
+            if (Math.random() > 0.9) AudioSys.step();
+        }
+        STATE.player.x = nextX;
+        STATE.player.y = nextY;
+    } else {
+        // 撞牆
+        if (Math.abs(STATE.player.vx) > 0.1 || Math.abs(STATE.player.vy) > 0.1) {
+             // 簡單防止連續觸發
+             if (Math.random() > 0.8) AudioSys.hit();
+        }
+    }
+
+    // 物件碰撞檢查
+    for (let i = STATE.objects.length - 1; i >= 0; i--) {
+        let obj = STATE.objects[i];
+        if (dist(STATE.player.x, STATE.player.y, obj.x, obj.y) < (obj.r + 5)) {
+            if (obj.type === 'coin') {
+                STATE.coins++;
+                AudioSys.coin();
+                STATE.objects.splice(i, 1);
+                updateCoinDisplay();
+            } 
+            else if (obj.type === 'flag') {
+                AudioSys.teleport();
+                alert("發現旗子！傳送至隱藏關卡！");
+                STATE.scene = 'HIDDEN';
+                initLevel(101);
+                return;
+            } 
+            else if (obj.type === 'exit') {
+                if (STATE.level === 101 && !STATE.doorOpen) {
+                    // 隱藏關卡門沒開不能進
+                } else {
+                    levelComplete();
+                }
+            }
+        }
+    }
+
+    // 隱藏關卡邏輯
+    if (STATE.level === 101) {
+        // 檢查模擬音量
+        let vol = document.getElementById('volume-control').value;
+        if (vol < 5 && !STATE.doorOpen) {
+            STATE.doorOpen = true;
+            AudioSys.door();
+            document.getElementById('top-hud').innerText = "出口已開啟！";
+        }
+    }
+}
+
+function levelComplete() {
+    AudioSys.win();
+    STATE.level++;
+    if (STATE.level > CONFIG.maxLevels && STATE.level !== 102) { // 100關通關後 -> 101
+        STATE.scene = 'HIDDEN';
+        alert("恭喜通關100層！解鎖隱藏關卡！");
+        initLevel(101);
+    } else if (STATE.level === 102) { // 隱藏關通關
+        alert("全遊戲通關！恭喜！");
+        STATE.scene = 'MENU';
+        resetGame();
+    } else {
+        // 下一關
+        initLevel(STATE.level);
+    }
+}
+
 function draw() {
+    // 清空背景
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     if (STATE.scene === 'MENU') {
-        ctx.fillStyle = '#fff';
-        ctx.font = '30px Courier';
-        ctx.textAlign = 'center';
-        ctx.fillText("黑白迷宮", canvas.width/2, canvas.height/2 - 50);
-        ctx.font = '16px Courier';
-        ctx.fillText("點擊 3 下開始遊戲", canvas.width/2, canvas.height/2 + 20);
-        ctx.fillText(`目前金幣: ${STATE.coins}`, canvas.width/2, canvas.height/2 + 60);
-    } 
-    else if (STATE.scene === 'GAME') {
-        // 繪製迷宮
-        let offsetX = (canvas.width - mazeWidth * cellSize) / 2;
-        let offsetY = (canvas.height - mazeHeight * cellSize) / 2;
-
-        for (let y = 0; y < mazeHeight; y++) {
-            for (let x = 0; x < mazeWidth; x++) {
-                let type = STATE.maze[y][x];
-                let posX = offsetX + x * cellSize;
-                let posY = offsetY + y * cellSize;
-
-                if (type === 1) { // 牆
-                    ctx.fillStyle = '#fff';
-                    ctx.fillRect(posX, posY, cellSize, cellSize);
-                } else if (type === 3) { // 出口
-                    ctx.fillStyle = '#888'; // 灰色門
-                    ctx.fillRect(posX + 5, posY + 5, cellSize - 10, cellSize - 10);
-                } else if (type === 4) { // 金幣
-                    ctx.fillStyle = '#FFD700'; // 金色 (雖然說是黑白，但金幣通常需要提示，這裡用淡白黃)
-                    ctx.beginPath();
-                    ctx.arc(posX + cellSize/2, posY + cellSize/2, cellSize/4, 0, Math.PI*2);
-                    ctx.fill();
-                } else if (type === 5) { // 旗子
-                    ctx.fillStyle = '#fff';
-                    ctx.font = `${cellSize/2}px Arial`;
-                    ctx.fillText('⚑', posX + cellSize/2, posY + cellSize/1.5);
-                }
-            }
-        }
-
-        // 繪製玩家
-        ctx.fillStyle = '#000'; // 玩家是黑色的（在白色路徑上）？不，路徑是黑的，牆是白的
-        // 更正：背景是黑，牆是白。路是黑。玩家需要是白框或灰點
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        let drawPx = offsetX + STATE.player.px;
-        let drawPy = offsetY + STATE.player.py;
-        ctx.arc(drawPx + cellSize/2, drawPy + cellSize/2, cellSize/3, 0, Math.PI*2);
-        ctx.stroke();
-
-    } 
-    else if (STATE.scene === 'HIDDEN_LEVEL') {
-        // 隱藏關卡：圓圈
-        let cx = canvas.width / 2;
-        let cy = canvas.height / 2;
-        let r = Math.min(canvas.width, canvas.height) * 0.3;
-
-        ctx.strokeStyle = '#fff';
-        ctx.lineWidth = 5;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI*2);
-        ctx.stroke();
-
-        // 入口 (左)
-        ctx.fillStyle = '#888';
-        ctx.fillText("IN", cx - r - 30, cy);
-        
-        // 出口 (右) - 根據門是否開啟變化
-        if (STATE.hiddenDoorOpen) {
-            ctx.fillStyle = '#fff';
-            ctx.fillText("EXIT OPEN", cx + r + 10, cy);
-        } else {
-            ctx.fillStyle = '#333';
-            ctx.fillText("LOCKED", cx + r + 10, cy);
-            ctx.font = '14px Courier';
-            ctx.fillStyle = '#aaa';
-            ctx.fillText("噓...保持安靜 (調低音量)", cx, cy + r + 40);
-        }
-
-        // 玩家在隱藏關卡
-        ctx.fillStyle = '#fff';
-        ctx.beginPath();
-        ctx.arc(cx + STATE.player.x, cy + STATE.player.y, 10, 0, Math.PI*2);
-        ctx.fill();
+        return; // 菜單由 DOM 顯示
     }
-    
+
+    if (STATE.shape) {
+        // 畫幾何圖形 (背景白，線條黑，或反之) -> 題目是黑白遊戲
+        // 我們用：黑色背景，白色幾何形狀區域(作為可行走區域)
+        ctx.fillStyle = '#fff';
+        if (STATE.shape.type === 'circle') {
+            ctx.beginPath();
+            ctx.arc(STATE.shape.cx, STATE.shape.cy, STATE.shape.r, 0, Math.PI*2);
+            ctx.fill();
+        } else {
+            ctx.beginPath();
+            STATE.shape.vertices.forEach((v, i) => {
+                if (i===0) ctx.moveTo(v.x, v.y);
+                else ctx.lineTo(v.x, v.y);
+            });
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    // 畫物件
+    STATE.objects.forEach(obj => {
+        if (obj.type === 'exit') {
+            // 出口
+            ctx.fillStyle = (STATE.level === 101 && !STATE.doorOpen) ? '#555' : '#000';
+            ctx.fillRect(obj.x - 10, obj.y - 10, 20, 20);
+            ctx.fillStyle = '#fff';
+            ctx.font = '12px Arial';
+            ctx.fillText("EXIT", obj.x-12, obj.y-12);
+        } else if (obj.type === 'coin') {
+            ctx.fillStyle = '#000'; // 白色底上的黑色幣
+            ctx.beginPath();
+            ctx.arc(obj.x, obj.y, obj.r, 0, Math.PI*2);
+            ctx.fill();
+            ctx.strokeStyle = '#000';
+            ctx.stroke();
+        } else if (obj.type === 'flag') {
+            ctx.fillStyle = '#000';
+            ctx.font = '20px Arial';
+            ctx.fillText("⚑", obj.x-5, obj.y+5);
+        }
+    });
+
+    // 畫玩家
+    ctx.fillStyle = '#000'; // 玩家是黑點
+    ctx.beginPath();
+    ctx.arc(STATE.player.x, STATE.player.y, 6, 0, Math.PI*2);
+    ctx.fill();
+    // 玩家外框以便在黑色物件堆中識別
+    ctx.strokeStyle = '#888'; 
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
     requestAnimationFrame(draw);
 }
 
-/**
- * 控制邏輯
- */
-
-// 傾斜控制
-window.addEventListener('deviceorientation', handleOrientation);
-// 鍵盤備用 (給電腦測試用)
-window.addEventListener('keydown', handleKeyMove);
-
-let tiltX = 0;
-let tiltY = 0;
-
-function handleOrientation(event) {
-    // 簡單過濾微小震動
-    let y = event.beta;  // 前後 (-180, 180)
-    let x = event.gamma; // 左右 (-90, 90)
-    
-    if (x > 90) x = 90;
-    if (x < -90) x = -90;
-
-    // 將角度轉換為速度向量 (-1 ~ 1)
-    tiltX = x / 45; 
-    tiltY = y / 45;
-    
-    // 死區
-    if (Math.abs(tiltX) < 0.1) tiltX = 0;
-    if (Math.abs(tiltY) < 0.1) tiltY = 0;
-
-    movePlayer();
-}
-
-function handleKeyMove(e) {
-    if (e.key === 'ArrowUp') tiltY = -0.5;
-    if (e.key === 'ArrowDown') tiltY = 0.5;
-    if (e.key === 'ArrowLeft') tiltX = -0.5;
-    if (e.key === 'ArrowRight') tiltX = 0.5;
-    if (e.key === ' ') { tiltX = 0; tiltY = 0; } // Stop
-    movePlayer();
-    // Reset key tilt after a short while to simulate impulse
-    setTimeout(() => { tiltX = 0; tiltY = 0; }, 100);
-}
-
-function movePlayer() {
-    if (STATE.scene !== 'GAME' && STATE.scene !== 'HIDDEN_LEVEL') return;
-
-    if (STATE.scene === 'GAME') {
-        // 計算新位置
-        let nextPx = STATE.player.px + tiltX * (canvas.width / 10); // 每次移動一格約螢幕1/10
-        let nextPy = STATE.player.py + tiltY * (canvas.height / 10);
-        
-        // 碰撞檢測 (簡化版：檢查中心點所在的格子)
-        let gridX = Math.floor((nextPx + cellSize/2) / cellSize);
-        let gridY = Math.floor((nextPy + cellSize/2) / cellSize);
-
-        if (gridY >= 0 && gridY < mazeHeight && gridX >= 0 && gridX < mazeWidth) {
-            let tile = STATE.maze[gridY][gridX];
-            
-            if (tile === 1) {
-                // 撞牆
-                playSound('hit');
-            } else {
-                // 移動成功
-                STATE.player.px = nextPx;
-                STATE.player.py = nextPy;
-                
-                // 檢查事件
-                if (tile === 3) { // 出口
-                    playSound('win');
-                    setTimeout(() => startLevel(STATE.level + 1), 1000);
-                } else if (tile === 4) { // 金幣
-                    STATE.maze[gridY][gridX] = 0; // 移除
-                    STATE.coins++;
-                    playSound('coin');
-                    updateHUD();
-                } else if (tile === 5) { // 旗子
-                    STATE.maze[gridY][gridX] = 0;
-                    playSound('teleport');
-                    alert("發現傳送門！前往隱藏關卡！");
-                    STATE.scene = 'HIDDEN_LEVEL';
-                    STATE.hiddenDoorOpen = false;
-                    document.getElementById('volume-sim').style.display = 'block';
-                } else {
-                    // 一般移動音效 (稍微限流避免太吵)
-                    if (Math.random() > 0.8) playSound('step');
-                }
-            }
-        } else {
-            playSound('hit'); // 邊界
-        }
-    } else if (STATE.scene === 'HIDDEN_LEVEL') {
-        // 隱藏關卡移動邏輯
-        STATE.player.x += tiltX * 5;
-        STATE.player.y += tiltY * 5;
-        
-        // 檢查是否出圈 (解謎成功後)
-        if (STATE.hiddenDoorOpen && STATE.player.x > 100) {
-             playSound('win');
-             alert("恭喜通關隱藏關卡！遊戲結束！");
-             STATE.scene = 'MENU';
-             document.getElementById('volume-sim').style.display = 'none';
-        }
-    }
+function gameLoop() {
+    update();
+    draw();
+    setTimeout(gameLoop, 1000/60);
 }
 
 /**
- * 觸控點擊指令系統
+ * 輸入控制系統
  */
-const touchLayer = document.getElementById('game-container');
 
-touchLayer.addEventListener('click', (e) => {
-    // 忽略按鈕點擊
+// 1. 重力感應 (移動)
+window.addEventListener('deviceorientation', (e) => {
+    // Beta: 前後 (-180, 180), Gamma: 左右 (-90, 90)
+    let y = e.beta; 
+    let x = e.gamma;
+    
+    // 限制角度並轉換為速度向量 (-1 ~ 1)
+    if (x > 45) x = 45; if (x < -45) x = -45;
+    if (y > 45) y = 45; if (y < -45) y = -45;
+    
+    STATE.player.vx = x / 45; // 左右移動
+    STATE.player.vy = y / 45; // 前後移動
+});
+
+// 電腦測試用 (鍵盤)
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp') STATE.player.vy = -1;
+    if (e.key === 'ArrowDown') STATE.player.vy = 1;
+    if (e.key === 'ArrowLeft') STATE.player.vx = -1;
+    if (e.key === 'ArrowRight') STATE.player.vx = 1;
+});
+window.addEventListener('keyup', () => {
+    STATE.player.vx = 0; STATE.player.vy = 0;
+});
+
+// 2. 觸控指令 (點擊次數判定)
+document.getElementById('game-container').addEventListener('click', (e) => {
+    // 忽略按鈕
     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
 
     STATE.tapCount++;
     clearTimeout(STATE.tapTimer);
-
+    
     STATE.tapTimer = setTimeout(() => {
-        executeTapCommand(STATE.tapCount);
+        handleTapCommand(STATE.tapCount);
         STATE.tapCount = 0;
     }, CONFIG.tapDelay);
 });
 
-function executeTapCommand(count) {
-    console.log(`Taps: ${count}, Scene: ${STATE.scene}`);
+function handleTapCommand(count) {
+    console.log("Tap count:", count);
     
-    // 主畫面指令
     if (STATE.scene === 'MENU') {
-        if (count === 3) { // 3下 開始
-            startLevel(1);
-        } else if (count === 2) { // 2下 放棄 (這裡定義為重置存檔或退出?)
-            // 由於在主畫面沒有"放棄關卡"的概念，這裡設為重置
-            if(confirm("重置所有進度？")) {
+        if (count === 3) { // 開始遊戲
+            STATE.scene = 'GAME';
+            initLevel(STATE.level); // 從當前記錄的關卡開始
+            document.getElementById('center-msg').style.display = 'none';
+        } 
+        else if (count === 2) { // 放棄/重置
+            if (confirm("要重置進度回到第1關嗎？")) {
                 STATE.level = 1;
                 STATE.coins = 0;
-                updateHUD();
+                updateCoinDisplay();
+                alert("進度已重置");
             }
-        } else if (count === 5) { // 5下 存檔
-            localStorage.setItem('bwMazeSave', JSON.stringify({
-                level: STATE.level,
-                coins: STATE.coins,
-                inventory: STATE.inventory
-            }));
-            showMessage("遊戲已儲存");
-        } else if (count === 1) { // 1下 確定 (購買商店物品用)
-             if (shopMode) buyItem();
         }
-    }
-    
-    // 遊戲中指令
-    if (STATE.scene === 'GAME' || STATE.scene === 'HIDDEN_LEVEL') {
-        if (count === 4) { // 4下 回主畫面
+        else if (count === 5) { // 儲存
+            localStorage.setItem('bwGameSave', JSON.stringify({
+                level: STATE.level,
+                coins: STATE.coins
+            }));
+            alert("遊戲紀錄已儲存！");
+        }
+        else if (count === 1) { // 確定/購買
+            if (STATE.coins >= CONFIG.coinCost) {
+                if(confirm(`是否花費 ${CONFIG.coinCost} 金幣更換移動音效？`)) {
+                    STATE.coins -= CONFIG.coinCost;
+                    STATE.player.soundType = (STATE.player.soundType + 1) % 5;
+                    updateCoinDisplay();
+                    alert("購買成功！");
+                }
+            } else {
+                alert("金幣不足 (需要 100)");
+            }
+        }
+    } 
+    else if (STATE.scene === 'GAME' || STATE.scene === 'HIDDEN') {
+        if (count === 4) { // 回主畫面
             STATE.scene = 'MENU';
-            document.getElementById('volume-sim').style.display = 'none';
-            updateHUD("主畫面");
+            document.getElementById('center-msg').style.display = 'block';
+            document.getElementById('top-hud').innerText = "遊戲暫停 (點3下繼續)";
+            document.getElementById('volume-control').style.display = 'none';
         }
     }
 }
 
-// 模擬音量偵測 (因為Web無法讀取系統音量)
-const volSlider = document.getElementById('volume-sim');
-volSlider.addEventListener('input', (e) => {
-    if (STATE.scene === 'HIDDEN_LEVEL') {
-        if (e.target.value < 10) { // 模擬"最低音量"
-            if (!STATE.hiddenDoorOpen) {
-                STATE.hiddenDoorOpen = true;
-                playSound('door');
-                showMessage("出口已開啟！");
-            }
-        }
-    }
-});
+function updateCoinDisplay() {
+    document.getElementById('bottom-hud').innerText = `金幣: ${STATE.coins}`;
+}
 
-// 隱藏/顯示螢幕功能
+function resetGame() {
+    STATE.level = 1;
+    document.getElementById('center-msg').style.display = 'block';
+    updateCoinDisplay();
+}
+
+/**
+ * 螢幕隱藏/顯示功能
+ */
 const blackScreen = document.getElementById('black-screen');
-const toggleBtn = document.getElementById('toggle-screen-btn');
-
-toggleBtn.addEventListener('click', () => {
-    STATE.isScreenHidden = true;
+document.getElementById('screen-toggle-btn').addEventListener('click', () => {
     blackScreen.style.display = 'flex';
 });
 
-// 模擬"按音量鍵"喚醒 -> 改為點擊黑色區域喚醒
+// 模擬音量鍵喚醒 (點擊黑屏)
 blackScreen.addEventListener('click', () => {
-    STATE.isScreenHidden = false;
     blackScreen.style.display = 'none';
 });
 
-// HUD 更新
-function updateHUD(title) {
-    const top = document.getElementById('top-hud');
-    const btm = document.getElementById('coin-display');
-    if (title) top.innerHTML = title + '<br><small>操作: 3下開始, 4下回主選單</small>';
-    btm.innerText = `金幣: ${STATE.coins}`;
-}
-
-function showMessage(msg) {
-    const el = document.getElementById('message-area');
-    el.innerText = msg;
-    el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 2000);
-}
-
-// 商店邏輯 (簡化)
-let shopMode = false;
-function openShop() {
-    shopMode = true;
-    updateHUD("商店: 1下購買音效 (100金)");
-}
-
-function buyItem() {
-    if (STATE.coins >= 100) {
-        STATE.coins -= 100;
-        STATE.player.soundId++; // 切換音效ID
-        updateHUD();
-        showMessage("購買成功！移動音效已變更");
-        playSound('coin');
-    } else {
-        showMessage("金幣不足！");
-    }
-}
-
 // 讀取存檔
-const save = localStorage.getItem('bwMazeSave');
-if (save) {
-    const data = JSON.parse(save);
+const savedData = localStorage.getItem('bwGameSave');
+if (savedData) {
+    const data = JSON.parse(savedData);
     STATE.level = data.level || 1;
     STATE.coins = data.coins || 0;
-    updateHUD();
+    updateCoinDisplay();
 }
 
-// 啟動與縮放
-resize();
+// 初始化畫布尺寸
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
 
-// iOS 權限請求 (必須透過使用者點擊觸發)
-document.body.addEventListener('click', async () => {
+// 啟動迴圈
+gameLoop();
+
+// iOS 權限請求 (必須由使用者觸發)
+document.addEventListener('click', async () => {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         try {
-            const permissionState = await DeviceOrientationEvent.requestPermission();
-            if (permissionState === 'granted') {
-                // OK
+            const resp = await DeviceOrientationEvent.requestPermission();
+            if (resp === 'granted') {
+                // 權限取得成功
             }
         } catch (e) {
             console.error(e);
